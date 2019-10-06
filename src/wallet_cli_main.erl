@@ -155,7 +155,7 @@ usage(OptSpecs) ->
     getopt:usage(OptSpecs, "wallet").
 
 handle_cmd(Specs, Args, Fun) ->
-    IdentOpts = fun(Opts) -> Opts end,
+    IdentOpts = fun(Opts) -> {ok, Opts} end,
     handle_cmd(Specs, Args, IdentOpts, Fun).
 
 handle_cmd(Specs, Args, OptFun, Fun) ->
