@@ -10,6 +10,7 @@ main(["create" | Args]) ->
         [
          {output_file, $o, "output",  {string, "wallet.key"}, "Output file to store the key in"},
          {force,       $f, "force",   undefined,               "Overwrite an existing file"},
+         {iterations,  $i, "iterations", {integer, 100000},    "Number of PBKDF2 iterations"},
          {help,        $h, "help",    undefined,               "Print this help text"}
         ],
 
@@ -64,7 +65,8 @@ cmd_create_config(Opts) ->
 cmd_create(Opts) ->
     Keys = #{ public := PubKey } = libp2p_crypto:generate_keys(ed25519),
     Password = proplists:get_value(password, Opts),
-    Bin = encrypt_keys(Keys, Password),
+    Iterations = proplists:get_value(iterations, Opts),
+    Bin = encrypt_keys(Keys, Password, Iterations),
     OutputFile = proplists:get_value(output_file, Opts),
     case {proplists:is_defined(force, Opts), file:read_file_info(OutputFile)} of
         {false, {ok, _}} ->
@@ -173,22 +175,26 @@ handle_cmd(Specs, Args, OptFun, Fun) ->
             usage(Specs)
     end.
 
-encrypt_keys(Keys=#{public := PubKey}, Password) ->
+encrypt_keys(Keys=#{public := PubKey}, Password, Iterations) ->
+    io:format("Iteratons ~p~n", [Iterations]),
     IV = crypto:strong_rand_bytes(8),
+    Salt = crypto:strong_rand_bytes(8),
     KeysBin = libp2p_crypto:keys_to_bin(Keys),
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
+    {ok, AESKey} = pbkdf2:pbkdf2(sha256, Password, Salt, Iterations),
     {EncryptBin, Tag} = crypto:crypto_one_time_aead(aes_256_gcm,
-                                                    crypto:hash(sha256, Password),
+                                                    AESKey,
                                                     IV,
                                                     KeysBin,
                                                     PubKeyBin,
                                                     7,
                                                     true),
-    <<PubKeyBin/binary, IV/binary, Tag/binary, EncryptBin/binary>>.
+    <<PubKeyBin/binary, IV/binary, Salt/binary, Iterations:32/integer-unsigned-little, Tag/binary, EncryptBin/binary>>.
 
-decrypt_keys(#{ pubkey_bin := PubKeyBin, iv := IV, tag := Tag, cipher_text := Encrypted}, Password) ->
+decrypt_keys(#{ pubkey_bin := PubKeyBin, iv := IV, salt := Salt, iterations := Iterations, tag := Tag, cipher_text := Encrypted}, Password) ->
+    {ok, AESKey} = pbkdf2:pbkdf2(sha256, Password, Salt, Iterations),
     crypto:crypto_one_time_aead(aes_256_gcm,
-                                crypto:hash(sha256, Password),
+                                AESKey,
                                 IV,
                                 Encrypted,
                                 PubKeyBin,
@@ -201,10 +207,12 @@ load_keys(Opts) ->
         {error, Error} ->
             {error, Filename, Error};
         {ok, FileBin} ->
-            <<PubKeyBin:33/binary, IV:8/binary, Tag:7/binary, Encrypted/binary>> = FileBin,
+            <<PubKeyBin:33/binary, IV:8/binary, Salt:8/binary, Iterations:32/integer-unsigned-little, Tag:7/binary, Encrypted/binary>> = FileBin,
             {ok, #{ filename => Filename,
                     pubkey_bin => PubKeyBin,
                     pubkey => libp2p_crypto:bin_to_pubkey(PubKeyBin),
+                    salt => Salt,
+                    iterations => Iterations,
                     iv => IV,
                     tag => Tag,
                     cipher_text => Encrypted

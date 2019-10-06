@@ -24,7 +24,8 @@
                   enacl,
                   getopt,
                   inets,
-                  ssl
+                  ssl,
+                  pbkdf2
                  ]},
   {env,[]},
 
