@@ -18,14 +18,14 @@ main(["create" | Args]) ->
 main(["info" | Args]) ->
     OptSpecs =
         [
-         {file, undefined, undefined, {string, "wallet.key", "Wallet file to load"}},
+         {file, undefined, undefined, {string, "wallet.key"}, "Wallet file to load"},
          {help, $h,        "help",    undefined,             "Print this help text"}
         ],
     handle_cmd(OptSpecs, Args, fun cmd_info/1);
 main(["verify" | Args]) ->
     OptSpecs =
         [
-         {file, undefined, undefined, {string, "wallet.key", "Wallet file to load"}},
+         {file, undefined, undefined, {string, "wallet.key"}, "Wallet file to load"},
          {help, $h,        "help",    undefined,             "Print this help text"}
         ],
     handle_cmd(OptSpecs, Args, fun cmd_verify_config/1, fun cmd_verify/1);
@@ -33,7 +33,7 @@ main(["balance" | Args]) ->
     OptSpecs =
         [
          {key,  $k,        "key",     string,                "Public key to get balance for"},
-         {file, undefined, undefined, {string, "wallet.key", "Wallet file to load"}},
+         {file, undefined, undefined, {string, "wallet.key"}, "Wallet file to load"},
          {help, $h,        "help",    undefined,              "Print this help text"}
         ],
     handle_cmd(OptSpecs, Args, fun cmd_balance/1);
