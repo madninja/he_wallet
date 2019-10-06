@@ -51,8 +51,8 @@ main(_) ->
 %%
 
 cmd_create_config(Opts) ->
-    Password = io:get_line("Password: "),
-    PasswordVerify = io:get_line("Verify Password: "),
+    Password = string:strip(string:strip(io:get_line("Password: "), right, $\n), right, $\r),
+    PasswordVerify = string:strip(string:strip(io:get_line("Verify Password: "), right, $\n), right, $\r),
     case Password == PasswordVerify of
         false ->
             io:format("Passwords do not match~n"),
@@ -93,7 +93,7 @@ cmd_info(Opts) ->
 %%
 
 cmd_verify_config(Opts) ->
-    Password = io:get_line("Passsword: "),
+    Password = string:strip(string:strip(io:get_line("Passsword: "), right, $\n), right, $\r),
     {ok, [{password, Password} | Opts]}.
 
 cmd_verify(Opts) ->
