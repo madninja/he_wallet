@@ -21,6 +21,7 @@
                   stdlib,
                   multiaddr,
                   libp2p_crypto,
+                  jsx,
                   enacl,
                   getopt,
                   inets,

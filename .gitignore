@@ -23,4 +23,4 @@ data/
 src/pb/
 gh_pages/
 doc/
-*.key
+*.key*
