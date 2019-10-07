@@ -25,7 +25,8 @@
                   getopt,
                   inets,
                   ssl,
-                  pbkdf2
+                  pbkdf2,
+                  erlang_sss
                  ]},
   {env,[]},
 

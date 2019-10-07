@@ -6,12 +6,20 @@
        {ref,"e86a2a94712a6cfe56aa274c0c9ee8f5f976b427"}},
   0},
  {<<"erl_base58">>,{pkg,<<"erl_base58">>,<<"0.0.1">>},1},
+ {<<"erlang_sss">>,
+  {git,"https://github.com/helium/erlang-sss",
+       {ref,"8933df4300ac2bf793f32e614b51a8f1fbf1ad27"}},
+  0},
  {<<"getopt">>,{pkg,<<"getopt">>,<<"1.0.1">>},0},
  {<<"jsx">>,{pkg,<<"jsx">>,<<"2.10.0">>},0},
  {<<"libp2p_crypto">>,{pkg,<<"libp2p_crypto">>,<<"1.0.1">>},0},
  {<<"multiaddr">>,{pkg,<<"multiaddr">>,<<"1.1.3">>},1},
  {<<"pbkdf2">>,{pkg,<<"pbkdf2">>,<<"2.0.0">>},0},
- {<<"small_ints">>,{pkg,<<"small_ints">>,<<"0.1.0">>},2}]}.
+ {<<"small_ints">>,{pkg,<<"small_ints">>,<<"0.1.0">>},2},
+ {<<"sss">>,
+  {git,"https://github.com/helium/erlang-sss",
+       {ref,"1aa44f21658cdf563b4c7fdecb1242ccc0216212"}},
+  0}]}.
 [
 {pkg_hash,[
  {<<"base32">>, <<"044F6DC95709727CA2176F3E97A41DDAA76B5BC690D3536908618C0CB32616A2">>},

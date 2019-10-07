@@ -15,6 +15,7 @@ endif
 compile:
 	$(REBAR) escriptize
 	cp _build/default/lib/enacl/priv/enacl_nif.so _build/default/bin
+	cp _build/default/lib/erlang_sss/priv/erlang_sss.so _build/default/bin
 
 shell:
 	$(REBAR) shell
