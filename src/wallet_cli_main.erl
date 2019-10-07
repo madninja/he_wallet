@@ -12,7 +12,7 @@ main(["create" | Args]) ->
          {force,       $f, "force",   undefined,               "Overwrite an existing file"},
          {iterations,  $i, "iterations", {integer, 100000},    "Number of PBKDF2 iterations"},
          {shards,      $n, "shards",  {integer, 1},            "Number of shards to break the key into"},
-         {required_shards, $k, "required-shards",  integer,     "Number of shards required to recover the key"},
+         {required_shards, $k, "required-shards",  integer,    "Number of shards required to recover the key"},
          {help,        $h, "help",    undefined,               "Print this help text"}
         ],
 
@@ -20,8 +20,8 @@ main(["create" | Args]) ->
 main(["info" | Args]) ->
     OptSpecs =
         [
-         {file, undefined, undefined, {string, "wallet.key"}, "Wallet file to load"},
-         {help, $h,        "help",    undefined,             "Print this help text"}
+         {file, $f, "file", {string, "wallet.key"}, "Wallet file to load"},
+         {help, $h, "help", undefined,              "Print this help text"}
         ],
     handle_cmd(OptSpecs, Args, fun cmd_info/1);
 main(["verify" | Args]) ->
@@ -31,15 +31,15 @@ main(["verify" | Args]) ->
     OptSpecs =
         [
          {file, $f, "file", {string, "wallet.key"}, "Wallet file to load"},
-         {help, $h,        "help",    undefined,             "Print this help text"}
+         {help, $h, "help", undefined,              "Print this help text"}
         ],
     handle_cmd(OptSpecs, Args, fun cmd_verify_config/1, fun cmd_verify/1);
 main(["balance" | Args]) ->
     OptSpecs =
         [
-         {key,  $k,        "key",     string,                "Public key to get balance for"},
-         {file, undefined, undefined, {string, "wallet.key"}, "Wallet file to load"},
-         {help, $h,        "help",    undefined,              "Print this help text"}
+         {key,  $k, "key",  string,                 "Public key to get balance for"},
+         {file, $f, "file", {string, "wallet.key"}, "Wallet file to load"},
+         {help, $h, "help", undefined,              "Print this help text"}
         ],
     handle_cmd(OptSpecs, Args, fun cmd_balance/1);
 main(_) ->
@@ -110,7 +110,7 @@ cmd_info(Opts) ->
     case load_keys(Opts) of
         {error, Filename, Error} ->
             io:format("Failed to read keys ~p: ~p~n", [Filename, Error]);
-        {ok, #{ pubkey := PubKey, filename := Filename }} ->
+        {ok, [#{ pubkey := PubKey, filename := Filename } | _]} ->
             io:format("Address: ~s~nFile: ~s~n",
                       [libp2p_crypto:pubkey_to_b58(PubKey), Filename])
     end.
@@ -165,7 +165,7 @@ cmd_balance(Opts) ->
             case load_keys(Opts) of
                 {error, Filename, Error} ->
                     io:format("Failed to read keys ~p: ~p~n", [Filename, Error]);
-                {ok, #{ pubkey := PubKey}} ->
+                {ok, [#{ pubkey := PubKey} | _]} ->
                     PB(libp2p_crypto:pubkey_to_b58(PubKey))
             end;
         KeyStr ->
@@ -253,7 +253,7 @@ decrypt_keys([HeadShare = #{recovery_threshold := K, iterations := Iterations, s
                    end, Shares) of
         true when length(Shares) >= K ->
             KeyShares = lists:map(fun(#{share := Share}) -> Share end, Shares),
-            SSSKey = erlang_sss:sss_combine_keyshares(KeyShares, K), 
+            SSSKey = erlang_sss:sss_combine_keyshares(KeyShares, K),
             {ok, AESKey} = pbkdf2:pbkdf2(sha256, Password, Salt, Iterations),
             FinalKey = crypto:hmac(sha256, SSSKey, AESKey),
             crypto:crypto_one_time_aead(aes_256_gcm,
