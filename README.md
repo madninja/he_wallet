@@ -11,8 +11,11 @@ suitability for use as a wallet associated with Helium crypto-tokens.
 
 ## Installation
 
-You will need to have Erlang 22.1 installed on your system and enough
-of a development environment to be able compile C code.
+You will need to have the following packages installed on your system:
+
+* Erlang 22.1 or later
+* libsodium or libsodium-dev
+* Enough of a development environment to be able to compile C-code (make, gcc/clang)
 
 Clone this git repository and build it using:
 
