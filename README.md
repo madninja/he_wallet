@@ -65,3 +65,39 @@ wallet displayed.
 
 The wallet in `wallet.key` will be read and the balances for the
 wallet retrieved from blockchain using the Helium Explorer API.
+
+## Key Sharding
+
+Sharding wallet keys is supported via [Shamir's Secret Sharing](https://github.com/dsprenkels/sss).  A key
+can be broken into N shards such that recovering the original key
+needs K distinct shards. This can be done by passing options to
+`create`:
+
+```
+    bin/wallet create -n 5 -k 3
+```
+
+This will create wallet.key.1 through wallet.key.5 (the base name of
+the wallet file can be supplied with the `-o` parameter).
+
+When keys are sharded using `verify` will require at least K distinct
+keys:
+
+```
+    bin/wallet verify -f wallet.key.1 -f wallet.key.2 -f wallet.key.5
+```
+
+The password will also be needed when verifying a sharded key.
+
+## Implementation details
+
+A ed25519 key is generated via libsodium. The provided password is run
+through PBKDF2, with a configurable number of iterations and a random
+salt, and the resulting value is used as an AES key. When sharding is
+enabled, an additional AES key is randomly generated and the 2 keys
+are combined using a sha256 HMAC into the final AES key.
+
+The private key is then encrypted with AES256-GCM and stored in the
+file along with the sharding information, the key share (if
+applicable), the AES initialization vector, the PBKDF2 salt and
+iteration count and the AES-GCM authentication tag.
