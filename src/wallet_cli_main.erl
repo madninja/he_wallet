@@ -8,12 +8,12 @@ main(["create" | Args]) ->
 
     OptSpecs =
         [
-         {output_file, $o, "output",  {string, "wallet.key"}, "Output file to store the key in"},
-         {force,       $f, "force",   undefined,               "Overwrite an existing file"},
-         {iterations,  $i, "iterations", {integer, 100000},    "Number of PBKDF2 iterations"},
-         {shards,      $n, "shards",  {integer, 1},            "Number of shards to break the key into"},
-         {required_shards, $k, "required-shards",  integer,    "Number of shards required to recover the key"},
-         {help,        $h, "help",    undefined,               "Print this help text"}
+         {output_file, $o,        "output",  {string, "wallet.key"}, "Output file to store the key in"},
+         {force,       undefined, "force",   undefined,               "Overwrite an existing file"},
+         {iterations,  $i,        "iterations", {integer, 100000},    "Number of PBKDF2 iterations"},
+         {shards,      $n,        "shards",  {integer, 1},            "Number of shards to break the key into"},
+         {required_shards, $k,    "required-shards",  integer,    "Number of shards required to recover the key"},
+         {help,        $h,        "help",    undefined,               "Print this help text"}
         ],
 
     handle_cmd(OptSpecs, Args, fun cmd_create_config/1, fun cmd_create/1);
@@ -52,6 +52,42 @@ main(_) ->
         ],
     usage(OptSpecs).
 
+
+-define(BASIC_KEY_V1,   16#0000).
+-define(SHARDED_KEY_V1, 16#0100).
+-type key_map() :: #{ secret => libp2p_crypto:privkey(), public => libp2p_crypto:pubkey()}.
+-record(basic_key_v1, {
+                       keymap :: key_map(),
+                       iterations :: pos_integer()
+                      }).
+-record(enc_basic_key_v1, {
+                           pubkey_bin :: libp2p_crypto:pubkey_bin(),
+                           iv :: binary(),
+                           salt:: binary(),
+                           iterations :: pos_integer(),
+                           tag :: binary(),
+                           encrypted :: binary()
+                          }).
+-record(sharded_key_v1, {
+                         keymap :: key_map(),
+                         iterations :: pos_integer(),
+                         key_shares :: pos_integer(),
+                         recovery_threshold :: pos_integer()
+                        }).
+-record(enc_sharded_key_v1, {
+                             key_shares :: pos_integer(),
+                             recovery_threshold :: pos_integer(),
+                             key_share :: binary(),
+                             pubkey_bin :: libp2p_crypto:pubkey_bin(),
+                             iv :: binary(),
+                             salt:: binary(),
+                             iterations :: pos_integer(),
+                             tag :: binary(),
+                             encrypted :: binary()
+                        }).
+-type key() :: #basic_key_v1{} | #sharded_key_v1{}.
+-type enc_key() :: #enc_basic_key_v1{} | #enc_sharded_key_v1{}.
+
 %%
 %% create
 %%
@@ -62,7 +98,7 @@ cmd_create_config(Opts) ->
     case Password == PasswordVerify of
         false ->
             io:format("Passwords do not match~n"),
-            false;
+            halt(1);
         true ->
             {ok, [{password, Password} | Opts]}
     end.
@@ -73,16 +109,27 @@ cmd_create(Opts) ->
     Iterations = proplists:get_value(iterations, Opts),
     Shards = proplists:get_value(shards, Opts),
     RecoveryThreshold = proplists:get_value(required_shards, Opts),
-    case Shards > 1 andalso is_integer(RecoveryThreshold) andalso RecoveryThreshold > 1 andalso Shards > RecoveryThreshold of
-        true  ->
-            ok;
-        false when Shards == 1 ->
-            ok;
-        false ->
-            io:format("If shards (~b) > 1 then recovery_shards (~p) must be specified and recovery_shards must be less than shards\n", [Shards, RecoveryThreshold]),
-            halt(1)
-    end,
-    Bins = encrypt_keys(Keys, Password, Iterations, Shards, RecoveryThreshold),
+    Key = case Shards > 1 andalso
+              is_integer(RecoveryThreshold) andalso
+              RecoveryThreshold > 1 andalso
+              Shards > RecoveryThreshold of
+              true  ->
+                  #sharded_key_v1{ keymap = Keys,
+                                   iterations = Iterations,
+                                   key_shares = Shards,
+                                   recovery_threshold = RecoveryThreshold
+                                 };
+              false when Shards == 1 ->
+                  #basic_key_v1{ keymap = Keys,
+                                 iterations = Iterations};
+              false ->
+                  io:format("If shards (~b) > 1 then recovery_shards (~p) must be specified and recovery_shards must be less than shards\n",
+                            [Shards, RecoveryThreshold]),
+                  halt(1)
+          end,
+
+    EncKeys = encrypt_key(Key, Password),
+    Bins = [enc_key_to_bin(K) || K <- EncKeys],
     OutputFile0 = proplists:get_value(output_file, Opts),
     OutputFiles = case length(Bins) of
                       1 ->
@@ -94,7 +141,8 @@ cmd_create(Opts) ->
     lists:foreach(fun({OutputFile, Bin}) ->
                           case {proplists:is_defined(force, Opts), file:read_file_info(OutputFile)} of
                               {false, {ok, _}} ->
-                                  io:format("File ~p already exists~n", [OutputFile]);
+                                  io:format("File ~p already exists~n", [OutputFile]),
+                                  halt(1);
                               {_, _} ->
                                   file:write_file(OutputFile, Bin),
                                   io:format("Address: ~s~nFile: ~s~n",
@@ -109,10 +157,13 @@ cmd_create(Opts) ->
 cmd_info(Opts) ->
     case load_keys(Opts) of
         {error, Filename, Error} ->
-            io:format("Failed to read keys ~p: ~p~n", [Filename, Error]);
-        {ok, [#{ pubkey := PubKey, filename := Filename } | _]} ->
-            io:format("Address: ~s~nFile: ~s~n",
-                      [libp2p_crypto:pubkey_to_b58(PubKey), Filename])
+            io:format("Failed to read keys ~p: ~p~n", [Filename, Error]),
+            halt(1);
+        {ok, EncKeys} ->
+            lists:foreach(fun({Filename, EncKey}) ->
+                                  io:format("Address: ~s~nFile: ~s~n",
+                                            [libp2p_crypto:pubkey_to_b58(pubkey(EncKey)), Filename])
+                          end, EncKeys)
     end.
 
 %%
@@ -127,10 +178,17 @@ cmd_verify(Opts) ->
     Password = proplists:get_value(password, Opts),
     case load_keys(Opts) of
         {error, Filename, Error} ->
-            io:format("Failed to read keys ~p: ~p~n", [Filename, Error]);
-        {ok, KeyMap} ->
-            Decrypt = case decrypt_keys(KeyMap, Password) of
-                          error -> false;
+            io:format("Failed to read keys ~p: ~p~n", [Filename, Error]),
+            halt(1);
+        {ok, Keys} ->
+            {_, EncKeys} = lists:unzip(Keys),
+            Decrypt = case decrypt_keys(EncKeys, Password) of
+                          {error, {not_enough_shares, S, K}} ->
+                              io:format("not enough keyshares; have ~p, need ~b~n", [S, K]),
+                              halt(1);
+                          {error, mismatched_shares} ->
+                              io:format("Not all key shares are congruent with each other\n"),
+                              halt(1);
                           _ -> true
                       end,
             io:format("Verify: ~p~n", [Decrypt])
@@ -147,7 +205,8 @@ cmd_balance(Opts) ->
                  URL = "https://explorer.helium.foundation/api/accounts/" ++ Key,
                  case httpc:request(URL) of
                      {error, Error} ->
-                         io:format("Failed to get balance: ~p~n", [Error]);
+                         io:format("Failed to get balance: ~p~n", [Error]),
+                         halt(1);
                      {ok, {_Code, _Headers, Result}} ->
                          Data = proplists:get_value(<<"data">>, jsx:decode(list_to_binary(Result))),
                          io:format("Address: ~s~n",
@@ -160,16 +219,21 @@ cmd_balance(Opts) ->
                                    [proplists:get_value(<<"security_balance">>, Data)])
                  end
          end,
-    case proplists:get_value(key, Opts, false) of
-        false ->
+    case proplists:get_all_values(key, Opts) of
+        [] ->
             case load_keys(Opts) of
                 {error, Filename, Error} ->
-                    io:format("Failed to read keys ~p: ~p~n", [Filename, Error]);
-                {ok, [#{ pubkey := PubKey} | _]} ->
-                    PB(libp2p_crypto:pubkey_to_b58(PubKey))
+                    io:format("Failed to read keys ~p: ~p~n", [Filename, Error]),
+                    halt(1);
+                {ok, Keys} ->
+                    lists:foreach(fun({_, EncKey}) ->
+                                          PB(libp2p_crypto:pubkey_to_b58(pubkey(EncKey)))
+                                  end, Keys)
             end;
-        KeyStr ->
-            PB(KeyStr)
+        [Keys] ->
+            lists:foreach(fun({_, Key}) ->
+                                  PB(libp2p_crypto:pubkey_to_b58(Key))
+                          end, Keys)
     end.
 
 
@@ -200,78 +264,190 @@ handle_cmd(Specs, Args, OptFun, Fun) ->
             usage(Specs)
     end.
 
-encrypt_keys(Keys=#{public := PubKey}, Password, Iterations, 1, _) ->
-    %% No sharding
+
+-spec encrypt_keymap(Key::binary(), IV::binary(), KeyMap::key_map())
+                    -> {PubKeyBin::binary(), Encrypted::binary(), Tag::binary()}.
+encrypt_keymap(Key, IV, KeyMap=#{public := PubKey}) ->
+    KeysBin = libp2p_crypto:keys_to_bin(KeyMap),
+    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
+    {Encrypted, Tag} = crypto:crypto_one_time_aead(aes_256_gcm, Key, IV, KeysBin, PubKeyBin, 7, true),
+    {PubKeyBin, Encrypted, Tag}.
+
+-spec decrypt_keymap(Key::binary(), IV::binary(), PubKeyBin::libp2p_crypto:pubkey_bin(),
+                     Encryted::binary(), Tag::binary()) -> {ok, key_map()} | {error, term()}.
+decrypt_keymap(Key, IV, PubKeyBin, Encrypted, Tag) ->
+    case crypto:crypto_one_time_aead(aes_256_gcm, Key, IV, Encrypted, PubKeyBin, Tag, false) of
+        error ->
+            {error, decrypt};
+        Bin ->
+            {ok, libp2p_crypto:keys_from_bin(Bin)}
+    end.
+
+
+pubkey(#basic_key_v1{ keymap=#{ public := PubKey}}) ->
+    PubKey;
+pubkey(#sharded_key_v1{ keymap=#{ public := PubKey}}) ->
+    PubKey;
+pubkey(#enc_basic_key_v1{ pubkey_bin=PubKeyBin}) ->
+    libp2p_crypto:bin_to_pubkey(PubKeyBin);
+pubkey(#enc_sharded_key_v1{ pubkey_bin=PubKeyBin}) ->
+    libp2p_crypto:bin_to_pubkey(PubKeyBin).
+
+-spec encrypt_key(key(), Password::binary()) -> [enc_key()].
+encrypt_key(#basic_key_v1{ keymap=KeyMap, iterations=Iterations}, Password) ->
     IV = crypto:strong_rand_bytes(8),
     Salt = crypto:strong_rand_bytes(8),
-    KeysBin = libp2p_crypto:keys_to_bin(Keys),
-    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
-    Shares = 1,
-    RecoveryThreshold = 1,
     {ok, AESKey} = pbkdf2:pbkdf2(sha256, Password, Salt, Iterations),
-    {EncryptBin, Tag} = crypto:crypto_one_time_aead(aes_256_gcm,
-                                                    AESKey,
-                                                    IV,
-                                                    KeysBin,
-                                                    PubKeyBin,
-                                                    7,
-                                                    true),
-    [<<Shares:8/integer-unsigned, RecoveryThreshold:8/integer, PubKeyBin/binary, IV/binary, Salt/binary, Iterations:32/integer-unsigned-little, Tag/binary, EncryptBin/binary>>];
-encrypt_keys(Keys=#{public := PubKey}, Password, Iterations, Shares, RecoveryThreshold) ->
+    {PubKeyBin, EncryptBin, Tag} = encrypt_keymap(AESKey, IV, KeyMap),
+    [#enc_basic_key_v1{
+        pubkey_bin=PubKeyBin,
+        iv = IV,
+        salt = Salt,
+        iterations = Iterations,
+        tag = Tag,
+        encrypted = EncryptBin
+       }];
+encrypt_key(#sharded_key_v1{ keymap=KeyMap, iterations=Iterations,
+                             key_shares=Shares, recovery_threshold=RecoveryThreshold},
+            Password) ->
     %% sharding
     IV = crypto:strong_rand_bytes(8),
     Salt = crypto:strong_rand_bytes(8),
     SSSKey = crypto:strong_rand_bytes(32),
-    KeysBin = libp2p_crypto:keys_to_bin(Keys),
-    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
     {ok, AESKey} = pbkdf2:pbkdf2(sha256, Password, Salt, Iterations),
     FinalKey = crypto:hmac(sha256, SSSKey, AESKey),
     KeyShares = erlang_sss:sss_create_keyshares(SSSKey, Shares, RecoveryThreshold),
-    {EncryptBin, Tag} = crypto:crypto_one_time_aead(aes_256_gcm,
-                                                    FinalKey,
-                                                    IV,
-                                                    KeysBin,
-                                                    PubKeyBin,
-                                                    7,
-                                                    true),
-    [ <<Shares:8/integer-unsigned, RecoveryThreshold:8/integer, KS:33/binary, PubKeyBin/binary, IV/binary, Salt/binary, Iterations:32/integer-unsigned-little, Tag/binary, EncryptBin/binary>> || KS <- KeyShares ].
+    {PubKeyBin, EncryptBin, Tag} = encrypt_keymap(FinalKey, IV, KeyMap),
+    [#enc_sharded_key_v1{
+        pubkey_bin=PubKeyBin,
+        iterations=Iterations,
+        iv = IV,
+        salt = Salt,
+        tag = Tag,
+        key_shares=Shares,
+        recovery_threshold = RecoveryThreshold,
+        key_share = KS,
+        encrypted = EncryptBin
+      } || KS <- KeyShares].
 
 
-decrypt_keys([#{ shares := 1, pubkey_bin := PubKeyBin, iv := IV, salt := Salt, iterations := Iterations, tag := Tag, cipher_text := Encrypted}], Password) ->
-    %% no shares
+-spec enc_key_to_bin(enc_key()) -> binary().
+enc_key_to_bin(#enc_basic_key_v1{pubkey_bin=PubKeyBin, iv=IV, salt=Salt, iterations=Iterations, tag=Tag,
+                                 encrypted=Encrypted}) ->
+    <<(?BASIC_KEY_V1):16/integer-unsigned-little,
+      PubKeyBin:33/binary,
+      IV:8/binary,
+      Salt:8/binary,
+      Iterations:32/integer-unsigned-little,
+      Tag:7/binary,
+      Encrypted/binary>>;
+enc_key_to_bin(#enc_sharded_key_v1{pubkey_bin=PubKeyBin, iv=IV, salt=Salt, iterations=Iterations, tag=Tag,
+                                   key_shares=Shares, recovery_threshold=RecoveryThreshold,
+                                   key_share=Share, encrypted=Encrypted}) ->
+    <<(?SHARDED_KEY_V1):16/integer-unsigned-little,
+      Shares:8/integer-unsigned,
+      RecoveryThreshold:8/integer-unsigned,
+      Share:33/binary,
+      PubKeyBin:33/binary,
+      IV:8/binary,
+      Salt:8/binary,
+      Iterations:32/integer-unsigned-little,
+      Tag:7/binary,
+      Encrypted/binary>>.
+
+-spec enc_key_from_bin(binary()) -> {ok, enc_key()} | {error, term()}.
+enc_key_from_bin(<<(?BASIC_KEY_V1):16/integer-unsigned-little,
+                   PubKeyBin:33/binary,
+                   IV:8/binary,
+                   Salt:8/binary,
+                   Iterations:32/integer-unsigned-little,
+                   Tag:7/binary,
+                   Encrypted/binary>>) ->
+    {ok, #enc_basic_key_v1{
+            pubkey_bin=PubKeyBin,
+            iv = IV,
+            salt = Salt,
+            iterations = Iterations,
+            tag = Tag,
+            encrypted = Encrypted
+           }};
+enc_key_from_bin(<<(?SHARDED_KEY_V1):16/integer-unsigned-little,
+                     Shares:8/integer-unsigned,
+                     RecoveryThreshold:8/integer,
+                     Share:33/binary,
+                     PubKeyBin:33/binary,
+                     IV:8/binary,
+                     Salt:8/binary,
+                     Iterations:32/integer-unsigned-little,
+                     Tag:7/binary,
+                     Encrypted/binary>>) ->
+    {ok, #enc_sharded_key_v1{
+            pubkey_bin=PubKeyBin,
+            iterations=Iterations,
+            iv = IV,
+            salt = Salt,
+            tag = Tag,
+            key_shares=Shares,
+            recovery_threshold = RecoveryThreshold,
+            key_share = Share,
+            encrypted = Encrypted
+           }};
+enc_key_from_bin(_) ->
+    {error, invalid_binary}.
+
+
+-spec decrypt_keys([enc_key()], Password::binary()) -> {ok, key()} | {error, term()}.
+decrypt_keys([#enc_basic_key_v1{salt=Salt, iterations=Iterations, iv=IV, tag=Tag, pubkey_bin=PubKeyBin,
+                                encrypted=Encrypted}], Password) ->
     {ok, AESKey} = pbkdf2:pbkdf2(sha256, Password, Salt, Iterations),
-    crypto:crypto_one_time_aead(aes_256_gcm,
-                                AESKey,
-                                IV,
-                                Encrypted,
-                                PubKeyBin,
-                                Tag,
-                                false);
-decrypt_keys([HeadShare = #{recovery_threshold := K, iterations := Iterations, salt := Salt, tag := Tag, iv := IV, pubkey_bin := PubKeyBin, cipher_text := Encrypted}|_] = Shares, Password) ->
-    case lists:all(fun(Share) ->
-                           maps:without([filename, share], HeadShare) == maps:without([filename, share], Share)
+    case decrypt_keymap(AESKey, IV, PubKeyBin, Encrypted, Tag) of
+        {error, Error} ->
+            {error, Error};
+        {ok, KeyMap} ->
+            #basic_key_v1{
+               keymap = KeyMap,
+               iterations = Iterations
+              }
+    end;
+decrypt_keys([HeadShare = #enc_sharded_key_v1{recovery_threshold = K,
+                                              iterations = Iterations,
+                                              key_shares = Shards,
+                                              salt = Salt,
+                                              tag = Tag,
+                                              iv = IV,
+                                              pubkey_bin = PubKeyBin,
+                                              encrypted = Encrypted}|_] = Shares, Password) ->
+    case lists:all(fun(Share=#enc_sharded_key_v1{}) ->
+                           HeadShare#enc_sharded_key_v1{key_share=undefined} ==
+                               Share#enc_sharded_key_v1{key_share=undefined};
+                      (_) ->
+                           false
                    end, Shares) of
         true when length(Shares) >= K ->
-            KeyShares = lists:map(fun(#{share := Share}) -> Share end, Shares),
+            KeyShares = lists:map(fun(#enc_sharded_key_v1{key_share=Share}) -> Share end, Shares),
             SSSKey = erlang_sss:sss_combine_keyshares(KeyShares, K),
             {ok, AESKey} = pbkdf2:pbkdf2(sha256, Password, Salt, Iterations),
             FinalKey = crypto:hmac(sha256, SSSKey, AESKey),
-            crypto:crypto_one_time_aead(aes_256_gcm,
-                                        FinalKey,
-                                        IV,
-                                        Encrypted,
-                                        PubKeyBin,
-                                        Tag,
-                                        false);
+            case decrypt_keymap(FinalKey, IV, PubKeyBin, Encrypted, Tag) of
+                {error, Error} ->
+                    {error, Error};
+                {ok, KeyMap} ->
+                    #sharded_key_v1{
+                       keymap = KeyMap,
+                       iterations=Iterations,
+                       key_shares = Shards,
+                       recovery_threshold = K
+                      }
+            end;
         true ->
-            io:format("not enough keyshares; have ~p, need ~b\n", [length(Shares), K]),
-            halt(1);
+            {error, {not_enough_shares, length(Shares), K}};
         false ->
-            io:format("Not all key shares are congruent with each other\n"),
-            halt(1)
+            {error, mismatched_shares}
     end.
 
 
+-spec load_keys(Opts::list())
+               -> {ok, [{Filename::string(), enc_key()}]} | {error, Filename::string(), term()}.
 load_keys(Opts) ->
     Filenames = proplists:get_all_values(file, Opts),
     lists:foldl(fun(_, {error, _, _}=Acc) ->
@@ -280,30 +456,10 @@ load_keys(Opts) ->
                         case file:read_file(Filename) of
                             {error, Error} ->
                                 {error, Filename, Error};
-                            {ok, <<1:8/integer-unsigned, 1:8/integer-unsigned, PubKeyBin:33/binary, IV:8/binary, Salt:8/binary, Iterations:32/integer-unsigned-little, Tag:7/binary, Encrypted/binary>>} ->
-                                {ok, [#{ filename => Filename,
-                                        pubkey_bin => PubKeyBin,
-                                        pubkey => libp2p_crypto:bin_to_pubkey(PubKeyBin),
-                                        salt => Salt,
-                                        iterations => Iterations,
-                                        iv => IV,
-                                        tag => Tag,
-                                        cipher_text => Encrypted,
-                                        shares => 1
-                                      } | Acc]};
-                            {ok, <<N:8/integer-unsigned, K:8/integer-unsigned, Share:33/binary, PubKeyBin:33/binary, IV:8/binary, Salt:8/binary, Iterations:32/integer-unsigned-little, Tag:7/binary, Encrypted/binary>>} ->
-                                {ok, [ #{ filename => Filename,
-                                        pubkey_bin => PubKeyBin,
-                                        pubkey => libp2p_crypto:bin_to_pubkey(PubKeyBin),
-                                        salt => Salt,
-                                        iterations => Iterations,
-                                        iv => IV,
-                                        tag => Tag,
-                                        cipher_text => Encrypted,
-                                        shares => N,
-                                        recovery_threshold => K,
-                                        share => Share
-                                      } | Acc]}
-
+                            {ok, FileBin} ->
+                                case enc_key_from_bin(FileBin) of
+                                    {ok, EncKey} -> {ok, [{Filename, EncKey} | Acc]};
+                                    {error, Error} -> {error, Filename, Error}
+                                end
                         end
                 end, {ok, []}, Filenames).
