@@ -14,7 +14,7 @@
 
 {application, wallet,
  [{description, "A simple CLI around managing a Helium wallet"},
-  {vsn, "0.1.0"},
+  {vsn, "1.0.0"},
   {registered, []},
   {applications, [
                   kernel,

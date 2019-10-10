@@ -2,7 +2,7 @@
 
 -export([main/1]).
 
-main(["create" | Args]) ->
+main(["create"=Cmd | Args]) ->
     AppDir = filename:dirname(filename:dirname(code:where_is_file("wallet"))),
     os:putenv("NIF_PATH", AppDir),
 
@@ -16,15 +16,15 @@ main(["create" | Args]) ->
          {help,        $h,        "help",    undefined,               "Print this help text"}
         ],
 
-    handle_cmd(OptSpecs, Args, fun cmd_create_config/1, fun cmd_create/1);
-main(["info" | Args]) ->
+    handle_cmd(OptSpecs, Cmd, Args, fun cmd_create_config/1, fun cmd_create/1);
+main(["info"=Cmd | Args]) ->
     OptSpecs =
         [
          {file, $f, "file", {string, "wallet.key"}, "Wallet file to load"},
          {help, $h, "help", undefined,              "Print this help text"}
         ],
-    handle_cmd(OptSpecs, Args, fun cmd_info/1);
-main(["verify" | Args]) ->
+    handle_cmd(OptSpecs, Cmd, Args, fun cmd_info/1);
+main(["verify"=Cmd | Args]) ->
     AppDir = filename:dirname(filename:dirname(code:where_is_file("wallet"))),
     os:putenv("NIF_PATH", AppDir),
 
@@ -33,24 +33,31 @@ main(["verify" | Args]) ->
          {file, $f, "file", {string, "wallet.key"}, "Wallet file to load"},
          {help, $h, "help", undefined,              "Print this help text"}
         ],
-    handle_cmd(OptSpecs, Args, fun cmd_verify_config/1, fun cmd_verify/1);
-main(["balance" | Args]) ->
+    handle_cmd(OptSpecs, Cmd, Args, fun cmd_verify_config/1, fun cmd_verify/1);
+main(["balance"=Cmd | Args]) ->
     OptSpecs =
         [
          {key,  $k, "key",  string,                 "Public key to get balance for"},
          {file, $f, "file", {string, "wallet.key"}, "Wallet file to load"},
          {help, $h, "help", undefined,              "Print this help text"}
         ],
-    handle_cmd(OptSpecs, Args, fun cmd_balance/1);
+    handle_cmd(OptSpecs, Cmd, Args, fun cmd_balance/1);
+main(["version"=Cmd | Args]) ->
+    OptSpecs =
+        [
+         {help, $h, "help", undefined,              "Print this help text"}
+        ],
+    handle_cmd(OptSpecs, Cmd, Args, fun cmd_version/1);
 main(_) ->
     OptSpecs =
         [
+         {version,undefined, undefined, undefined, "Displays the version of this application"},
          {create, undefined, undefined, undefined, "Create a new encrypted wallet"},
          {verify, undefined, undefined, undefined, "Verify an ecnrypted wallet"},
          {info,   undefined, undefined, undefined, "Get public wallet address"},
          {balance,undefined, undefined, undefined, "Get balance for a wallet or a given address"}
         ],
-    usage(OptSpecs).
+    usage("", OptSpecs).
 
 
 -define(BASIC_KEY_V1,   16#0000).
@@ -87,6 +94,18 @@ main(_) ->
                         }).
 -type key() :: #basic_key_v1{} | #sharded_key_v1{}.
 -type enc_key() :: #enc_basic_key_v1{} | #enc_sharded_key_v1{}.
+
+%%
+%% version
+%%
+
+cmd_version(_) ->
+    application:load(wallet),
+    Version = case lists:keyfind(wallet, 1, application:loaded_applications()) of
+                  false -> "unknown";
+                  {_, _, V} -> V
+              end,
+    io:format("Version: ~s~n", [Version]).
 
 %%
 %% create
@@ -242,18 +261,18 @@ cmd_balance(Opts) ->
 %%
 
 
-usage(OptSpecs) ->
-    getopt:usage(OptSpecs, "wallet").
+usage(Cmd, OptSpecs) ->
+    getopt:usage(OptSpecs, io_lib:format("wallet ~s", [Cmd])).
 
-handle_cmd(Specs, Args, Fun) ->
+handle_cmd(Specs, Cmd, Args, Fun) ->
     IdentOpts = fun(Opts) -> {ok, Opts} end,
-    handle_cmd(Specs, Args, IdentOpts, Fun).
+    handle_cmd(Specs, Cmd, Args, IdentOpts, Fun).
 
-handle_cmd(Specs, Args, OptFun, Fun) ->
+handle_cmd(Specs, Cmd, Args, OptFun, Fun) ->
     case getopt:parse(Specs, Args) of
         {ok, {Opts,_}} ->
             case proplists:is_defined(help, Opts) of
-                true -> usage(Specs);
+                true -> usage(Cmd, Specs);
                 false ->
                     case OptFun(Opts) of
                         false -> false;
@@ -261,7 +280,7 @@ handle_cmd(Specs, Args, OptFun, Fun) ->
                     end
             end;
         {error, _} ->
-            usage(Specs)
+            usage(Cmd, Specs)
     end.
 
 
