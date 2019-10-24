@@ -464,11 +464,11 @@ encrypt_key(#sharded_key{ version=Version, keymap=KeyMap, iterations=Iterations,
 
 
 iv_and_tag_length(?BASIC_KEY_V1) ->
-    {7, 8};
+    {8, 7};
 iv_and_tag_length(?BASIC_KEY_V2) ->
     {12, 16};
 iv_and_tag_length(?SHARDED_KEY_V1) ->
-    {7, 8};
+    {8, 7};
 iv_and_tag_length(?SHARDED_KEY_V2) ->
     {12, 16}.
 
@@ -478,7 +478,7 @@ enc_key_to_bin(#enc_basic_key{version=Version, pubkey_bin=PubKeyBin, iv=IV,
                               salt=Salt, iterations=Iterations, tag=Tag,
                               encrypted=Encrypted}) ->
     {IVLength, TagLength} = iv_and_tag_length(Version),
-    <<(Version):16/integer-unsigned-little,
+    <<Version:16/integer-unsigned-little,
       PubKeyBin:33/binary,
       IV:(IVLength)/binary,
       Salt:8/binary,
@@ -490,7 +490,7 @@ enc_key_to_bin(#enc_sharded_key{version=Version,pubkey_bin=PubKeyBin, iv=IV,
                                 key_shares=Shares, recovery_threshold=RecoveryThreshold,
                                 key_share=Share, encrypted=Encrypted}) ->
     {IVLength, TagLength} = iv_and_tag_length(Version),
-    <<(Version):16/integer-unsigned-little,
+    <<Version:16/integer-unsigned-little,
       Shares:8/integer-unsigned,
       RecoveryThreshold:8/integer-unsigned,
       Share:33/binary,
