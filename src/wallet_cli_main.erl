@@ -1,20 +1,25 @@
 -module(wallet_cli_main).
 
 -export([main/1]).
+-export([cmd_create_basic/1, cmd_create_basic/2,
+         cmd_create_sharded/1, cmd_create_sharded/2]).
+
+-define(PBKDF2_DEFAULT_ITERATIONS, 100000).
+-define(SHARDED_DEFAULT_SHARDS, 5).
+-define(SHARDED_DEFAULT_REQUIRED_SHARDS, 3).
 
 basic_key_opt_specs() ->
     [
-     {output_file, $o,        "output",  {string, "wallet.key"}, "Output file to store the key in"},
-     {force,       undefined, "force",   undefined,               "Overwrite an existing file"},
-     {iterations,  $i,        "iterations", {integer, 100000},    "Number of PBKDF2 iterations"}
+     {output_file, $o, "output", {string, "wallet.key"}, "Output file to store the key in"},
+     {force, undefined, "force", undefined, "Overwrite an existing file"},
+     {iterations,  $i, "iterations", {integer, ?PBKDF2_DEFAULT_ITERATIONS}, "Number of PBKDF2 iterations"}
     ].
 
 sharded_key_opt_specs() ->
     basic_key_opt_specs() ++
         [
-         {shards,      $n,        "shards",  {integer, 5},
-          "Number of shards to break the key into"},
-         {required_shards, $k,    "required-shards",  {integer, 3},
+         {shards, $n, "shards", {integer, ?SHARDED_DEFAULT_SHARDS}, "Number of shards to break the key into"},
+         {required_shards, $k, "required-shards", {integer, ?SHARDED_DEFAULT_REQUIRED_SHARDS},
           "Number of shards required to recover the key"}
         ].
 
@@ -174,7 +179,7 @@ cmd_create_basic(Opts) ->
 
 cmd_create_basic(Opts, Keys = #{ public := PubKey }) ->
     Password = proplists:get_value(password, Opts),
-    Iterations = proplists:get_value(iterations, Opts),
+    Iterations = proplists:get_value(iterations, Opts, ?PBKDF2_DEFAULT_ITERATIONS),
     Key = #basic_key{
              version = ?BASIC_KEY_V2,
              keymap = Keys,
@@ -197,9 +202,9 @@ cmd_create_sharded(Opts) ->
 
 cmd_create_sharded(Opts, Keys = #{ public := PubKey}) ->
     Password = proplists:get_value(password, Opts),
-    Iterations = proplists:get_value(iterations, Opts),
-    Shards = proplists:get_value(shards, Opts),
-    RecoveryThreshold = proplists:get_value(required_shards, Opts),
+    Iterations = proplists:get_value(iterations, Opts, ?PBKDF2_DEFAULT_ITERATIONS),
+    Shards = proplists:get_value(shards, Opts, ?SHARDED_DEFAULT_SHARDS),
+    RecoveryThreshold = proplists:get_value(required_shards, Opts, ?SHARDED_DEFAULT_REQUIRED_SHARDS),
     Key = #sharded_key{
              version = ?SHARDED_KEY_V2,
              keymap = Keys,
